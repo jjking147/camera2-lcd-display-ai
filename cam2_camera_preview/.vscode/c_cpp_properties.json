@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/opt/toolchains/arm-linux-gnueabihf-gcc-4.9.4/arm-linux-gnueabihf/include",
+                "/opt/toolchains/arm-linux-gnueabihf-gcc-4.9.4/lib/gcc/arm-linux-gnueabihf/4.9.4/include",
+                "/opt/toolchains/arm-linux-gnueabihf-gcc-4.9.4/arm-linux-gnueabihf/libc/usr/include",
+                "/home/fyj/imx6ull/imx6ull_linux/include",
+                "/home/fyj/imx6ull/imx6ull_linux/include/uapi",
+                "/home/fyj/imx6ull/imx6ull_linux/arch/arm/include",
+                "/home/fyj/imx6ull/imx6ull_linux/arch/arm/include/uapi",
+                "/home/fyj/imx6ull/imx6ull_linux/arch/arm/include/generated",
+                "/home/fyj/glibc"
+            ],
+            "defines": [],
+            "compilerPath": "/opt/toolchains/arm-linux-gnueabihf-gcc-4.9.4/bin/arm-linux-gnueabihf-gcc",
+            "cStandard": "gnu99",
+            "intelliSenseMode": "linux-gcc-arm"
+        }
+    ],
+    "version": 4
+}
