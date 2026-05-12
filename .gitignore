@@ -1,0 +1,6 @@
+cam2_camera_preview/app/capture_display
+cam2_camera_preview/app/capture_display.o
+cam2_camera_preview/app/fb_utils.o
+cam2_camera_preview/app/imgproc.o
+cam2_camera_preview/app/key_input.o
+cam2_camera_preview/app/v4l2_utils.o
