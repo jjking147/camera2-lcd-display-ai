@@ -204,3 +204,148 @@ void yuyv_to_sobel_center(const uint8_t *yuyv, int src_w, int src_h,
 
     free(gray);
 }
+
+void yuyv_copy(const uint8_t *src, uint8_t *dst, int w, int h)
+{
+    if (!src || !dst)
+        return;
+    memcpy(dst, src, (size_t)w * (size_t)h * 2);
+}
+
+void yuyv_to_gray_yuyv(const uint8_t *src, uint8_t *dst, int w, int h)
+{
+    if (!src || !dst)
+        return;
+
+    size_t pixels = (size_t)w * (size_t)h;
+    for (size_t i = 0; i < pixels; i += 2)
+    {
+        size_t idx = i * 2;
+        dst[idx] = src[idx];         /* Y0 */
+        dst[idx + 1] = 128;          /* U */
+        dst[idx + 2] = src[idx + 2]; /* Y1 */
+        dst[idx + 3] = 128;          /* V */
+    }
+}
+
+void yuyv_to_sobel_yuyv(const uint8_t *src, uint8_t *dst, int w, int h)
+{
+    if (!src || !dst)
+        return;
+
+    int stride = w * 2;
+    uint8_t *gray = malloc((size_t)w * (size_t)h);
+    if (!gray)
+        return;
+
+    for (int y = 0; y < h; y++)
+    {
+        for (int x = 0; x < w; x++)
+        {
+            gray[y * w + x] = src[y * stride + x * 2];
+        }
+    }
+
+    for (int y = 0; y < h; y++)
+    {
+        for (int x = 0; x < w; x += 2)
+        {
+            uint8_t y0 = 0;
+            uint8_t y1 = 0;
+
+            if (y > 0 && y < h - 1 && x > 0 && x < w - 1)
+            {
+                int gx =
+                    -1 * gray[(y - 1) * w + (x - 1)] +
+                    0 * gray[(y - 1) * w + x] +
+                    1 * gray[(y - 1) * w + (x + 1)] +
+                    -2 * gray[y * w + (x - 1)] +
+                    0 * gray[y * w + x] +
+                    2 * gray[y * w + (x + 1)] +
+                    -1 * gray[(y + 1) * w + (x - 1)] +
+                    0 * gray[(y + 1) * w + x] +
+                    1 * gray[(y + 1) * w + (x + 1)];
+
+                int gy =
+                    -1 * gray[(y - 1) * w + (x - 1)] +
+                    -2 * gray[(y - 1) * w + x] +
+                    -1 * gray[(y - 1) * w + (x + 1)] +
+                    0 * gray[y * w + (x - 1)] +
+                    0 * gray[y * w + x] +
+                    0 * gray[y * w + (x + 1)] +
+                    1 * gray[(y + 1) * w + (x - 1)] +
+                    2 * gray[(y + 1) * w + x] +
+                    1 * gray[(y + 1) * w + (x + 1)];
+
+                if (gx < 0)
+                    gx = -gx;
+                if (gy < 0)
+                    gy = -gy;
+                int mag = gx + gy;
+                if (mag > 255)
+                    mag = 255;
+                y0 = (uint8_t)mag;
+            }
+
+            if (y > 0 && y < h - 1 && (x + 1) > 0 && (x + 1) < w - 1)
+            {
+                int gx =
+                    -1 * gray[(y - 1) * w + x] +
+                    0 * gray[(y - 1) * w + (x + 1)] +
+                    1 * gray[(y - 1) * w + (x + 2)] +
+                    -2 * gray[y * w + x] +
+                    0 * gray[y * w + (x + 1)] +
+                    2 * gray[y * w + (x + 2)] +
+                    -1 * gray[(y + 1) * w + x] +
+                    0 * gray[(y + 1) * w + (x + 1)] +
+                    1 * gray[(y + 1) * w + (x + 2)];
+
+                int gy =
+                    -1 * gray[(y - 1) * w + x] +
+                    -2 * gray[(y - 1) * w + (x + 1)] +
+                    -1 * gray[(y - 1) * w + (x + 2)] +
+                    0 * gray[y * w + x] +
+                    0 * gray[y * w + (x + 1)] +
+                    0 * gray[y * w + (x + 2)] +
+                    1 * gray[(y + 1) * w + x] +
+                    2 * gray[(y + 1) * w + (x + 1)] +
+                    1 * gray[(y + 1) * w + (x + 2)];
+
+                if (gx < 0)
+                    gx = -gx;
+                if (gy < 0)
+                    gy = -gy;
+                int mag = gx + gy;
+                if (mag > 255)
+                    mag = 255;
+                y1 = (uint8_t)mag;
+            }
+
+            size_t idx = (size_t)(y * w + x) * 2;
+            dst[idx] = y0;
+            dst[idx + 1] = 128;
+            dst[idx + 2] = y1;
+            dst[idx + 3] = 128;
+        }
+    }
+
+    free(gray);
+}
+
+void yuyv_to_uyvy_inplace(uint8_t *buf, int w, int h)
+{
+    if (!buf)
+        return;
+    size_t total = (size_t)w * (size_t)h * 2;
+    for (size_t i = 0; i + 3 < total; i += 4)
+    {
+        uint8_t y0 = buf[i];
+        uint8_t u = buf[i + 1];
+        uint8_t y1 = buf[i + 2];
+        uint8_t v = buf[i + 3];
+        buf[i] = u;
+        buf[i + 1] = y0;
+        buf[i + 2] = v;
+        buf[i + 3] = y1;
+    }
+}

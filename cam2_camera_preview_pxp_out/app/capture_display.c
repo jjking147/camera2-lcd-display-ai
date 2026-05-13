@@ -15,7 +15,7 @@
 #include "fb_utils.h"
 #include "imgproc.h"
 #include "key_input.h"
-#include "pxp_utils.h"
+#include "pxp_output_utils.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +33,7 @@
 #define PXP_DEV "/dev/video0"
 #define KEY_INPUT_DEV "/dev/input/event2" /* gpio-keys 设备节点，按需修改 */
 #define RING_SIZE 8                       /* ring buffer 帧数 */
+#define DUMP_FRAMES 3
 
 /* ========== Ring Buffer ========== */
 typedef struct
@@ -109,7 +110,16 @@ static int ring_get(ring_buffer_t *rb, void *data, size_t *size)
 /* ========== 全局状态 ========== */
 static volatile int quit = 0;
 static volatile int filter_mode = FILTER_NORMAL;
-static pxp_context_t pxp;
+static pxp_output_t pxp_out;
+
+static void dump_frame(const char *path, const uint8_t *data, size_t size)
+{
+    FILE *fp = fopen(path, "wb");
+    if (!fp)
+        return;
+    fwrite(data, 1, size, fp);
+    fclose(fp);
+}
 
 /* ========== 信号处理 ========== */
 static void sig_handler(int sig)
@@ -157,12 +167,20 @@ static void *display_thread(void *arg)
 {
     fb_context_t *fb = (fb_context_t *)arg;
     uint8_t *frame = malloc(CAPTURE_W * CAPTURE_H * 2);
+    uint8_t *yuyv_out = malloc(CAPTURE_W * CAPTURE_H * 2);
     if (!frame)
         return NULL;
+    if (!yuyv_out)
+    {
+        free(frame);
+        return NULL;
+    }
     size_t frame_size;
     // 偏移，缩放后左上角的坐标
     int offset_x = (DISPLAY_W - CAPTURE_W) / 2;
     int offset_y = (DISPLAY_H - CAPTURE_H) / 2;
+    int use_pxp_out = (pxp_out.fd >= 0);
+    int dumped = 0;
 
     struct timespec ts_start, ts_end;
     clock_gettime(CLOCK_MONOTONIC, &ts_start);
@@ -176,41 +194,69 @@ static void *display_thread(void *arg)
         ring_get(&ring, frame, &frame_size); // 从缓冲区里取帧
         (void)frame_size;                    // 告诉系统这个值我不用
 
-        // 每帧前清空绘制区域 (避免残留)
-        for (int y = offset_y; y < offset_y + CAPTURE_H && y < DISPLAY_H; y++)
+        if (!use_pxp_out)
         {
-            memset(&fb->backbuf[y * fb->width + offset_x], 0, CAPTURE_W * 2);
+            // 每帧前清空绘制区域 (避免残留)
+            for (int y = offset_y; y < offset_y + CAPTURE_H && y < DISPLAY_H; y++)
+            {
+                memset(&fb->backbuf[y * fb->width + offset_x], 0, CAPTURE_W * 2);
+            }
         }
 
         int mode = filter_mode;
 
-        switch (mode)
+        if (use_pxp_out)
         {
-        case FILTER_NORMAL:
-            if (pxp.fd >= 0)
+            switch (mode)
             {
-                if (pxp_yuyv_to_rgb565_center(&pxp, frame, frame_size,
-                                              fb->backbuf, fb->width, fb->height,
-                                              offset_x, offset_y) == 0)
-                    break;
-                fprintf(stderr, "[PXP] convert failed, fallback to CPU path\n");
+            case FILTER_NORMAL:
+                yuyv_copy(frame, yuyv_out, CAPTURE_W, CAPTURE_H);
+                break;
+            case FILTER_GRAY:
+                yuyv_to_gray_yuyv(frame, yuyv_out, CAPTURE_W, CAPTURE_H);
+                break;
+            case FILTER_SOBEL:
+                yuyv_to_sobel_yuyv(frame, yuyv_out, CAPTURE_W, CAPTURE_H);
+                break;
+            default:
+                break;
             }
-            yuyv_to_rgb565_center(frame, CAPTURE_W, CAPTURE_H,
-                                  fb->backbuf, fb->width, fb->height,
-                                  offset_x, offset_y);
-            break;
-        case FILTER_GRAY:
-            yuyv_to_gray_center(frame, CAPTURE_W, CAPTURE_H,
-                                fb->backbuf, fb->width, fb->height,
-                                offset_x, offset_y);
-            break;
-        case FILTER_SOBEL:
-            yuyv_to_sobel_center(frame, CAPTURE_W, CAPTURE_H,
-                                 fb->backbuf, fb->width, fb->height,
-                                 offset_x, offset_y);
-            break;
-        default:
-            break;
+            yuyv_to_uyvy_inplace(yuyv_out, CAPTURE_W, CAPTURE_H);
+            if (dumped < DUMP_FRAMES)
+            {
+                char path[128];
+                size_t sz = (size_t)CAPTURE_W * (size_t)CAPTURE_H * 2;
+                snprintf(path, sizeof(path), "/root/pxp_in_%02d.yuyv", dumped);
+                dump_frame(path, frame, sz);
+                snprintf(path, sizeof(path), "/root/pxp_proc_%02d.yuyv", dumped);
+                dump_frame(path, yuyv_out, sz);
+                snprintf(path, sizeof(path), "/root/pxp_uyvy_%02d.uyvy", dumped);
+                dump_frame(path, yuyv_out, sz);
+                dumped++;
+            }
+        }
+        else
+        {
+            switch (mode)
+            {
+            case FILTER_NORMAL:
+                yuyv_to_rgb565_center(frame, CAPTURE_W, CAPTURE_H,
+                                      fb->backbuf, fb->width, fb->height,
+                                      offset_x, offset_y);
+                break;
+            case FILTER_GRAY:
+                yuyv_to_gray_center(frame, CAPTURE_W, CAPTURE_H,
+                                    fb->backbuf, fb->width, fb->height,
+                                    offset_x, offset_y);
+                break;
+            case FILTER_SOBEL:
+                yuyv_to_sobel_center(frame, CAPTURE_W, CAPTURE_H,
+                                     fb->backbuf, fb->width, fb->height,
+                                     offset_x, offset_y);
+                break;
+            default:
+                break;
+            }
         }
 
         if (mode != last_filter)
@@ -219,7 +265,18 @@ static void *display_thread(void *arg)
             last_filter = mode;
         }
 
-        fb_flush(fb);
+        if (use_pxp_out)
+        {
+            if (pxp_output_put_frame(&pxp_out, yuyv_out, CAPTURE_W, CAPTURE_H) < 0)
+            {
+                fprintf(stderr, "[PXP-OUT] send frame failed, fallback to CPU\n");
+                pxp_output_close(&pxp_out);
+                use_pxp_out = 0;
+            }
+        }
+
+        if (!use_pxp_out)
+            fb_flush(fb);
 
         display_count++;
 
@@ -234,6 +291,7 @@ static void *display_thread(void *arg)
         }
     }
 
+    free(yuyv_out);
     free(frame);
     printf("[DISP] thread exit, %d displayed\n", display_count);
     return NULL;
@@ -290,13 +348,13 @@ int main(void)
         return 1;
     }
 
-    if (pxp_init(&pxp, PXP_DEV, CAPTURE_W, CAPTURE_H) < 0)
+    if (pxp_output_init(&pxp_out, PXP_DEV, CAPTURE_W, CAPTURE_H) < 0)
     {
-        fprintf(stderr, "[PXP] init failed on %s, use CPU fallback\n", PXP_DEV);
+        fprintf(stderr, "[PXP-OUT] init failed on %s, use CPU fallback\n", PXP_DEV);
     }
     else
     {
-        printf("[PXP] init ok on %s, YUYV -> RGB565 enabled\n", PXP_DEV);
+        printf("[PXP-OUT] init ok on %s, YUYV -> RGB565 output enabled\n", PXP_DEV);
     }
 
     if (ring_init(&ring) < 0)
@@ -331,7 +389,7 @@ int main(void)
 
     /* 清理 */
     key_close(key_fd);
-    pxp_close(&pxp);
+    pxp_output_close(&pxp_out);
     v4l2_camera_close(&cam);
     ring_free(&ring);
     fb_close(&fb);

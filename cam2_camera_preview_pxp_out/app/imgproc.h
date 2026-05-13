@@ -32,4 +32,16 @@ void yuyv_to_sobel_center(const uint8_t *yuyv, int src_w, int src_h,
                           uint16_t *dst_buf, int dst_w, int dst_h,
                           int offset_x, int offset_y);
 
+/* YUYV -> YUYV (保持原样) */
+void yuyv_copy(const uint8_t *src, uint8_t *dst, int w, int h);
+
+/* YUYV -> YUYV 灰度 (仅改 Y，UV 置 128) */
+void yuyv_to_gray_yuyv(const uint8_t *src, uint8_t *dst, int w, int h);
+
+/* YUYV -> YUYV Sobel (Y=边缘，UV=128) */
+void yuyv_to_sobel_yuyv(const uint8_t *src, uint8_t *dst, int w, int h);
+
+/* YUYV -> UYVY 原地转换 (给 PXP 输出使用) */
+void yuyv_to_uyvy_inplace(uint8_t *buf, int w, int h);
+
 #endif
