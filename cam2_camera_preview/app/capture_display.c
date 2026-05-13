@@ -29,8 +29,8 @@
 #define CAPTURE_H 480
 #define DISPLAY_W 1024
 #define DISPLAY_H 600
-#define KEY_GPIO 18 /* GPIO1_IO18 (阿尔法开发板 KEY0) */
-#define RING_SIZE 8 /* ring buffer 帧数 */
+#define KEY_INPUT_DEV "/dev/input/event2" /* gpio-keys 设备节点，按需修改 */
+#define RING_SIZE 8                       /* ring buffer 帧数 */
 
 /* ========== Ring Buffer ========== */
 typedef struct
@@ -227,15 +227,14 @@ static void *display_thread(void *arg)
 }
 
 /* ========== 按键轮询 (在主线程) ========== */
-static void key_poll_loop(int gpio)
+static void key_poll_loop(int fd)
 {
     static int prev = 0;
     while (!quit)
     {
-        int now = key_pressed(gpio);
+        int now = key_pressed(fd);
         if (now && !prev)
         {
-            /* 上升沿/下降沿根据实际电平定，这里按低有效 */
             filter_mode = (filter_mode + 1) % FILTER_COUNT;
             const char *names[] = {"NORMAL", "GRAY", "SOBEL"};
             printf("[KEY] filter => %s\n", names[filter_mode]);
@@ -251,6 +250,7 @@ int main(void)
     v4l2_camera_t cam;
     fb_context_t fb;
     pthread_t cap_tid, disp_tid;
+    int key_fd = -1;
 
     printf("========================================\n");
     printf("  i.MX6ULL Camera Preview + ImageProc\n");
@@ -286,7 +286,9 @@ int main(void)
     }
 
     /* 启动按键 */
-    key_init(KEY_GPIO);
+    key_fd = key_init(KEY_INPUT_DEV);
+    if (key_fd < 0)
+        fprintf(stderr, "[KEY] open %s failed, key disabled\n", KEY_INPUT_DEV);
 
     /* 启动采集 */
     v4l2_camera_start(&cam);
@@ -296,16 +298,17 @@ int main(void)
     pthread_create(&disp_tid, NULL, display_thread, &fb);
 
     /* 主线程处理按键 */
-    printf("[MAIN] Press GPIO%d to switch filter. Ctrl+C to exit.\n", KEY_GPIO);
+    printf("[MAIN] Press key on %s to switch filter. Ctrl+C to exit.\n", KEY_INPUT_DEV);
     printf("[MAIN] Filters: 0=NORMAL 1=GRAY 2=SOBEL\n");
-    key_poll_loop(KEY_GPIO);
+    if (key_fd >= 0)
+        key_poll_loop(key_fd);
 
     /* 等待线程退出 */
     pthread_join(cap_tid, NULL);
     pthread_join(disp_tid, NULL);
 
     /* 清理 */
-    key_close(KEY_GPIO);
+    key_close(key_fd);
     v4l2_camera_close(&cam);
     ring_free(&ring);
     fb_close(&fb);

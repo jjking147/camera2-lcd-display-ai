@@ -1,6 +1,6 @@
 /*
- * key_input.c - GPIO 按键检测实现
- * 通过 /sys/class/gpio 操作
+ * key_input.c - 按键检测实现
+ * 通过 /dev/input/eventX 读取 gpio-keys 事件 (非阻塞)
  */
 
 #include "key_input.h"
@@ -9,86 +9,42 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <linux/input.h>
 
-/* 导出 GPIO */
-static int gpio_export(int gpio)
+int key_init(const char *input_dev)
 {
-    char path[128];
-    snprintf(path, sizeof(path), "/sys/class/gpio/export");
-    int fd = open(path, O_WRONLY);
+    int fd = open(input_dev, O_RDONLY | O_NONBLOCK);
     if (fd < 0)
     {
-        perror("gpio export");
+        perror("open input device");
         return -1;
     }
-    char num[16];
-    int len = snprintf(num, sizeof(num), "%d", gpio);
-    if (write(fd, num, len) < 0)
+    printf("[KEY] %s opened\n", input_dev);
+    return fd;
+}
+
+int key_pressed(int fd)
+{
+    struct input_event ev;
+    int pressed = 0;
+    while (1)
     {
-        /* 可能已经导出 */
+        ssize_t n = read(fd, &ev, sizeof(ev));
+        if (n < (ssize_t)sizeof(ev))
+            break;
+        if (ev.type == EV_KEY && ev.code == KEY_VOLUMEDOWN)
+        {
+            pressed = ev.value; /* 1=按下, 0=释放 */
+        }
     }
-    close(fd);
-    return 0;
+    return pressed;
 }
 
-static int gpio_unexport(int gpio)
+void key_close(int fd)
 {
-    char path[128];
-    snprintf(path, sizeof(path), "/sys/class/gpio/unexport");
-    int fd = open(path, O_WRONLY);
-    if (fd < 0)
-        return -1;
-    char num[16];
-    int len = snprintf(num, sizeof(num), "%d", gpio);
-    write(fd, num, len);
-    close(fd);
-    return 0;
-}
-
-static int gpio_set_direction(int gpio, const char *dir)
-{
-    char path[128];
-    snprintf(path, sizeof(path), "/sys/class/gpio/gpio%d/direction", gpio);
-    int fd = open(path, O_WRONLY);
-    if (fd < 0)
-    {
-        perror("gpio_set_direction");
-        return -1;
-    }
-    write(fd, dir, strlen(dir));
-    close(fd);
-    return 0;
-}
-
-int key_init(int gpio_num)
-{
-    gpio_export(gpio_num);
-    usleep(100000); /* 等 sysfs 创建 */
-    gpio_set_direction(gpio_num, "in");
-    printf("[KEY] GPIO %d initialized\n", gpio_num);
-    return 0;
-}
-
-int key_pressed(int gpio_num)
-{
-    char path[128];
-    char val = '1';
-    snprintf(path, sizeof(path), "/sys/class/gpio/gpio%d/value", gpio_num);
-    int fd = open(path, O_RDONLY);
-    if (fd < 0)
-        return 0;
-    if (read(fd, &val, 1) < 1)
+    if (fd >= 0)
     {
         close(fd);
-        return 0;
+        printf("[KEY] closed\n");
     }
-    close(fd);
-    /* 按下 = '0' (低电平), 弹起 = '1' */
-    return (val == '0');
-}
-
-void key_close(int gpio_num)
-{
-    gpio_unexport(gpio_num);
-    printf("[KEY] GPIO %d released\n", gpio_num);
 }
