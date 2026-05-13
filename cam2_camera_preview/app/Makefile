@@ -6,7 +6,7 @@ CC      = $(CROSS)gcc
 CFLAGS  = -O2 -Wall -pthread -std=gnu99 -D_GNU_SOURCE
 LDFLAGS = -pthread
 
-SRCS    = capture_display.c v4l2_utils.c fb_utils.c imgproc.c key_input.c
+SRCS    = capture_display.c v4l2_utils.c fb_utils.c imgproc.c key_input.c pxp_utils.c
 OBJS    = $(SRCS:.c=.o)
 TARGET  = capture_display
 

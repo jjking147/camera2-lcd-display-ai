@@ -182,7 +182,7 @@ void v4l2_camera_close(v4l2_camera_t *cam)
     printf("[V4L2] closed\n");
 }
 
-int v4l2_camera_get_frame(v4l2_camera_t *cam, void **data, size_t *size)
+int v4l2_camera_get_frame(v4l2_camera_t *cam, void **data, size_t *size) // 把某个可读的缓冲区的地址的大小拿到手，并且返回索引
 {
     struct v4l2_buffer buf;
     memset(&buf, 0, sizeof(buf));
@@ -203,7 +203,7 @@ int v4l2_camera_get_frame(v4l2_camera_t *cam, void **data, size_t *size)
     return (int)buf.index;
 }
 
-int v4l2_camera_put_frame(v4l2_camera_t *cam, int index)
+int v4l2_camera_put_frame(v4l2_camera_t *cam, int index) // 把这个index的缓冲区还给内核
 {
     struct v4l2_buffer buf;
     memset(&buf, 0, sizeof(buf));

@@ -15,6 +15,7 @@
 #include "fb_utils.h"
 #include "imgproc.h"
 #include "key_input.h"
+#include "pxp_utils.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +30,7 @@
 #define CAPTURE_H 480
 #define DISPLAY_W 1024
 #define DISPLAY_H 600
+#define PXP_DEV "/dev/video0"
 #define KEY_INPUT_DEV "/dev/input/event2" /* gpio-keys 设备节点，按需修改 */
 #define RING_SIZE 8                       /* ring buffer 帧数 */
 
@@ -51,8 +53,8 @@ static int ring_init(ring_buffer_t *rb)
     memset(rb, 0, sizeof(*rb));
     for (int i = 0; i < RING_SIZE; i++)
     {
-        rb->data[i] = malloc(CAPTURE_W * CAPTURE_H * 2);
-        if (!rb->data[i])
+        rb->data[i] = malloc(CAPTURE_W * CAPTURE_H * 2); // 为每个缓冲区分配一帧的内存
+        if (!rb->data[i])                                // 分配失败就退出
             return -1;
     }
     pthread_mutex_init(&rb->lock, NULL);
@@ -74,16 +76,16 @@ static void ring_free(ring_buffer_t *rb)
 static int ring_put(ring_buffer_t *rb, const void *data, size_t size)
 {
     pthread_mutex_lock(&rb->lock);
-    if (rb->count >= RING_SIZE)
+    if (rb->count >= RING_SIZE) // 如果缓冲区满了，就丢弃最老帧
     {
         /* discard oldest */
         rb->tail = (rb->tail + 1) % RING_SIZE;
-        rb->count--;
+        rb->count--; // count从满的变成满的-1
     }
-    memcpy(rb->data[rb->head], data, size);
-    rb->size[rb->head] = size;
-    rb->head = (rb->head + 1) % RING_SIZE;
-    rb->count++;
+    memcpy(rb->data[rb->head], data, size); // 用新帧填充head指向的缓冲区
+    rb->size[rb->head] = size;              // 用新帧的size填充目前head的size
+    rb->head = (rb->head + 1) % RING_SIZE;  // head+1了，因为新帧填完之后+1才是最新一帧的首地址
+    rb->count++;                            // 缓冲区又被填了一帧
     pthread_cond_signal(&rb->cond);
     pthread_mutex_unlock(&rb->lock);
     return 0;
@@ -94,12 +96,12 @@ static int ring_get(ring_buffer_t *rb, void *data, size_t *size)
     pthread_mutex_lock(&rb->lock);
     while (rb->count == 0)
     {
-        pthread_cond_wait(&rb->cond, &rb->lock);
+        pthread_cond_wait(&rb->cond, &rb->lock); // 如果缓冲区里面没有帧了，就阻塞并且等待新帧插入唤醒
     }
-    memcpy(data, rb->data[rb->tail], rb->size[rb->tail]);
-    *size = rb->size[rb->tail];
-    rb->tail = (rb->tail + 1) % RING_SIZE;
-    rb->count--;
+    memcpy(data, rb->data[rb->tail], rb->size[rb->tail]); // 取最老的那一帧
+    *size = rb->size[rb->tail];                           // 把size的真实值给送出来，方便以后有需要调用
+    rb->tail = (rb->tail + 1) % RING_SIZE;                // 最老的那一帧被取走了，指向下一帧
+    rb->count--;                                          // 取走一帧
     pthread_mutex_unlock(&rb->lock);
     return 0;
 }
@@ -107,6 +109,7 @@ static int ring_get(ring_buffer_t *rb, void *data, size_t *size)
 /* ========== 全局状态 ========== */
 static volatile int quit = 0;
 static volatile int filter_mode = FILTER_NORMAL;
+static pxp_context_t pxp;
 
 /* ========== 信号处理 ========== */
 static void sig_handler(int sig)
@@ -116,7 +119,7 @@ static void sig_handler(int sig)
 }
 
 /* ========== 采集线程 ========== */
-static void *capture_thread(void *arg)
+static void *capture_thread(void *arg) // 传入v4l2_camera_t结构体的void *版
 {
     v4l2_camera_t *cam = (v4l2_camera_t *)arg;
     int frame_count = 0;
@@ -125,7 +128,8 @@ static void *capture_thread(void *arg)
     {
         void *data = NULL;
         size_t size = 0;
-        int idx = v4l2_camera_get_frame(cam, &data, &size);
+        // DQBUF
+        int idx = v4l2_camera_get_frame(cam, &data, &size); // 告诉内核我要拿可读的缓冲区了，内核会自己分配可读缓冲区的地址和大小给cam，并且函数会返回缓冲区索引index
         if (idx < 0)
         {
             if (quit)
@@ -135,13 +139,13 @@ static void *capture_thread(void *arg)
         }
 
         /* 拷贝到 ring buffer */
-        ring_put(&ring, data, size);
+        ring_put(&ring, data, size); // ringput需要用到帧的首地址和大小，用来memcpy填充之前分配的rb.data帧缓冲区域
 
         /* 归还 V4L2 buffer */
-        v4l2_camera_put_frame(cam, idx);
+        v4l2_camera_put_frame(cam, idx); // 告诉内核这个缓冲区我用完了，可以拿去继续填充了
 
-        frame_count++;
-        if (frame_count % 100 == 0)
+        frame_count++;              // 读取到的总帧数
+        if (frame_count % 100 == 0) // 每一百帧都打印一次
             printf("[CAP] %d frames\n", frame_count);
     }
     printf("[CAP] thread exit, total %d frames\n", frame_count);
@@ -156,7 +160,7 @@ static void *display_thread(void *arg)
     if (!frame)
         return NULL;
     size_t frame_size;
-
+    // 偏移，缩放后左上角的坐标
     int offset_x = (DISPLAY_W - CAPTURE_W) / 2;
     int offset_y = (DISPLAY_H - CAPTURE_H) / 2;
 
@@ -169,10 +173,10 @@ static void *display_thread(void *arg)
 
     while (!quit)
     {
-        ring_get(&ring, frame, &frame_size);
-        (void)frame_size;
+        ring_get(&ring, frame, &frame_size); // 从缓冲区里取帧
+        (void)frame_size;                    // 告诉系统这个值我不用
 
-        /* 每帧前清空绘制区域 (避免残留) */
+        // 每帧前清空绘制区域 (避免残留)
         for (int y = offset_y; y < offset_y + CAPTURE_H && y < DISPLAY_H; y++)
         {
             memset(&fb->backbuf[y * fb->width + offset_x], 0, CAPTURE_W * 2);
@@ -183,6 +187,14 @@ static void *display_thread(void *arg)
         switch (mode)
         {
         case FILTER_NORMAL:
+            if (pxp.fd >= 0)
+            {
+                if (pxp_yuyv_to_rgb565_center(&pxp, frame, frame_size,
+                                              fb->backbuf, fb->width, fb->height,
+                                              offset_x, offset_y) == 0)
+                    break;
+                fprintf(stderr, "[PXP] convert failed, fallback to CPU path\n");
+            }
             yuyv_to_rgb565_center(frame, CAPTURE_W, CAPTURE_H,
                                   fb->backbuf, fb->width, fb->height,
                                   offset_x, offset_y);
@@ -208,6 +220,7 @@ static void *display_thread(void *arg)
         }
 
         fb_flush(fb);
+
         display_count++;
 
         /* 每 100 帧输出 FPS */
@@ -277,6 +290,15 @@ int main(void)
         return 1;
     }
 
+    if (pxp_init(&pxp, PXP_DEV, CAPTURE_W, CAPTURE_H) < 0)
+    {
+        fprintf(stderr, "[PXP] init failed on %s, use CPU fallback\n", PXP_DEV);
+    }
+    else
+    {
+        printf("[PXP] init ok on %s, YUYV -> RGB565 enabled\n", PXP_DEV);
+    }
+
     if (ring_init(&ring) < 0)
     {
         fprintf(stderr, "Ring buffer init failed\n");
@@ -309,6 +331,7 @@ int main(void)
 
     /* 清理 */
     key_close(key_fd);
+    pxp_close(&pxp);
     v4l2_camera_close(&cam);
     ring_free(&ring);
     fb_close(&fb);
