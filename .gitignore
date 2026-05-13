@@ -4,3 +4,6 @@ cam2_camera_preview/app/fb_utils.o
 cam2_camera_preview/app/imgproc.o
 cam2_camera_preview/app/key_input.o
 cam2_camera_preview/app/v4l2_utils.o
+cam2_camera_preview_pxp_out/app/pxp_uyvy*
+cam2_camera_preview_pxp_out/app/pxp_proc*
+cam2_camera_preview_pxp_out/app/pxp_in_*
