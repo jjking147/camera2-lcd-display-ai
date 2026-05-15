@@ -63,6 +63,42 @@ static inline uint16_t gray_to_rgb565(uint8_t y)
     return (uint16_t)(((y << 8) & 0xF800) | ((y << 3) & 0x07E0) | ((y >> 3) & 0x001F));
 }
 
+/* ========== UYVY → RGB565 居中显示 ========== */
+void uyvy_to_rgb565_center(const uint8_t *uyvy, int src_w, int src_h,
+                           uint16_t *dst_buf, int dst_w, int dst_h,
+                           int offset_x, int offset_y)
+{
+    if (!uyvy || !dst_buf)
+        return;
+    int src_stride = src_w * 2; /* UYVY: 2字节/像素 */
+    (void)dst_h;
+
+    for (int y = 0; y < src_h; y++)
+    {
+        int dst_row = offset_y + y;
+        if (dst_row < 0 || dst_row >= dst_h)
+            continue;
+        const uint8_t *src_row = uyvy + y * src_stride;
+        uint16_t *dst_row_ptr = dst_buf + dst_row * dst_w + offset_x;
+
+        for (int x = 0; x < src_w; x += 2)
+        {
+            int dst_x = offset_x + x;
+            if (dst_x >= 0 && dst_x + 1 < dst_w)
+            {
+                /* UYVY: [U, Y0, V, Y1] → pixelpair(Y0, U, Y1, V) */
+                yuyv_to_rgb565_pixelpair(
+                    src_row[x * 2 + 1], /* Y0 */
+                    src_row[x * 2],     /* U  */
+                    src_row[x * 2 + 3], /* Y1 */
+                    src_row[x * 2 + 2], /* V  */
+                    &dst_row_ptr[x],
+                    &dst_row_ptr[x + 1]);
+            }
+        }
+    }
+}
+
 /* ========== 滤镜 0: YUYV → RGB565 居中显示 ========== */
 void yuyv_to_rgb565_center(const uint8_t *yuyv, int src_w, int src_h,
                            uint16_t *dst_buf, int dst_w, int dst_h,

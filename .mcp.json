@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "mimo-image-recognition": {
+      "command": "/home/fyj/.local/bin/uvx",
+      "args": [
+        "--refresh",
+        "mimo-image-recognition-mcp"
+      ],
+      "env": {
+        "MIMO_API_KEY": "tp-c2ho7ooboshs9xaxky50cpn3o5vyqdhhs1bzjvsnw9xhus5k",
+        "MIMO_API_BASE": "https://token-plan-cn.xiaomimimo.com/v1",
+        "MIMO_MODEL": "mimo-v2.5"
+      }
+    }
+  }
+}

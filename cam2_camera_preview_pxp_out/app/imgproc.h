@@ -17,6 +17,11 @@ typedef enum
     FILTER_COUNT
 } filter_mode_t;
 
+/* UYVY 一帧 → RGB565 backbuf (居中显示, 给 PXP output-only 使用) */
+void uyvy_to_rgb565_center(const uint8_t *uyvy, int src_w, int src_h,
+                           uint16_t *dst_buf, int dst_w, int dst_h,
+                           int offset_x, int offset_y);
+
 /* YUYV 一帧 → RGB565 backbuf (行从 (offset_x, offset_y) 开始, 居中显示) */
 void yuyv_to_rgb565_center(const uint8_t *yuyv, int src_w, int src_h,
                            uint16_t *dst_buf, int dst_w, int dst_h,

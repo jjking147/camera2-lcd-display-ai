@@ -1,5 +1,9 @@
 /*
  * pxp_output_utils.c - PXP output-only 显示实现
+ *
+ * PXP 只做 DMA 搬运，不做 CSC。调用者需提供 RGB565 数据。
+ * PXP 输出格式必须匹配 framebuffer (1024x600 RGB565)，
+ * 否则 pxp_show_buf 切换 framebuffer 基地址后 stride 不匹配。
  */
 
 #include "pxp_output_utils.h"
@@ -84,7 +88,9 @@ static void pxp_output_unmap_buffers(struct v4l2_buffer_wrap *buffers,
 static int pxp_output_stream_on(int fd)
 {
     enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    if (ioctl(fd, VIDIOC_STREAMON, &type) < 0)
+    int ret = ioctl(fd, VIDIOC_STREAMON, &type);
+    printf("[PXP-OUT] STREAMON ret=%d%s\n", ret, ret < 0 ? " (FAILED)" : " (OK)");
+    if (ret < 0)
         return -1;
     return 0;
 }
@@ -149,21 +155,20 @@ int pxp_output_init(pxp_output_t *pxp, const char *dev, int width, int height)
     if (ioctl(pxp->fd, VIDIOC_S_CROP, &crop) < 0)
         perror("[PXP-OUT] VIDIOC_S_CROP");
 
+    /* 设置 PXP 输出格式: RGB565, 尺寸匹配 framebuffer */
     memset(&fmt, 0, sizeof(fmt));
     fmt.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    fmt.fmt.pix.width = width;
-    fmt.fmt.pix.height = height;
-    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_UYVY;
+    fmt.fmt.pix.width = 1024;
+    fmt.fmt.pix.height = 600;
+    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_RGB565;
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
-    fmt.fmt.pix.colorspace = V4L2_COLORSPACE_SRGB;
-    fmt.fmt.pix.bytesperline = width * 2;
-    fmt.fmt.pix.sizeimage = width * height * 2;
     if (ioctl(pxp->fd, VIDIOC_S_FMT, &fmt) < 0)
     {
         perror("[PXP-OUT] VIDIOC_S_FMT");
         goto fail;
     }
 
+    /* 读回 PXP 实际协商的格式 */
     memset(&fmt, 0, sizeof(fmt));
     fmt.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
     if (ioctl(pxp->fd, VIDIOC_G_FMT, &fmt) < 0)
@@ -171,6 +176,16 @@ int pxp_output_init(pxp_output_t *pxp, const char *dev, int width, int height)
         perror("[PXP-OUT] VIDIOC_G_FMT");
         goto fail;
     }
+
+    printf("[PXP-OUT] negotiated: %dx%d, pixfmt=0x%x (%c%c%c%c), bpl=%d, size=%d\n",
+           fmt.fmt.pix.width, fmt.fmt.pix.height,
+           fmt.fmt.pix.pixelformat,
+           (fmt.fmt.pix.pixelformat >> 0) & 0xFF,
+           (fmt.fmt.pix.pixelformat >> 8) & 0xFF,
+           (fmt.fmt.pix.pixelformat >> 16) & 0xFF,
+           (fmt.fmt.pix.pixelformat >> 24) & 0xFF,
+           fmt.fmt.pix.bytesperline,
+           fmt.fmt.pix.sizeimage);
 
     pxp->width = fmt.fmt.pix.width;
     pxp->height = fmt.fmt.pix.height;
@@ -257,13 +272,13 @@ static int pxp_output_qbuf(int fd, unsigned int index, size_t bytesused)
     return 0;
 }
 
-int pxp_output_put_frame(pxp_output_t *pxp, const uint8_t *yuyv, int width, int height)
+int pxp_output_put_frame(pxp_output_t *pxp, const uint8_t *rgb565, int width, int height)
 {
     unsigned int idx;
     size_t row_bytes;
     size_t bytesused;
 
-    if (!pxp || pxp->fd < 0 || !yuyv)
+    if (!pxp || pxp->fd < 0 || !rgb565)
     {
         errno = EINVAL;
         return -1;
@@ -298,32 +313,42 @@ int pxp_output_put_frame(pxp_output_t *pxp, const uint8_t *yuyv, int width, int 
         {
             uint8_t *dst = (uint8_t *)pxp->out_buffers[idx].start +
                            (size_t)y * (size_t)pxp->bytesperline;
-            memcpy(dst, yuyv + (size_t)y * row_bytes, row_bytes);
+            memcpy(dst, rgb565 + (size_t)y * row_bytes, row_bytes);
         }
     }
     else
     {
-        memcpy(pxp->out_buffers[idx].start, yuyv, (size_t)width * (size_t)height * 2);
+        memcpy(pxp->out_buffers[idx].start, rgb565, (size_t)width * (size_t)height * 2);
     }
-/* test pattern: alternate rows of white/gray */
-    size_t test_row = (size_t)width * 2;
-    for (int y = 0; y < pxp->height; y++)
-    {
-        memset((uint8_t *)pxp->out_buffers[idx].start + (size_t)y * test_row, (y & 1) ? 0x00 : 0xAA, test_row);
-    }
-
-
     if (pxp_output_qbuf(pxp->fd, idx, bytesused) < 0)
         return -1;
 
     if (!pxp->streaming)
     {
+        /* 读取 framebuffer 物理地址 (STREAMON 前) */
+        FILE *fp = fopen("/sys/class/graphics/fb0/phys_addr", "r");
+        if (fp) {
+            char buf[32];
+            if (fgets(buf, sizeof(buf), fp))
+                printf("[PXP-OUT] fb0 phys_addr before STREAMON: %s", buf);
+            fclose(fp);
+        }
+
         if (pxp_output_stream_on(pxp->fd) < 0)
         {
             perror("[PXP-OUT] STREAMON");
             return -1;
         }
         pxp->streaming = 1;
+
+        /* 读取 framebuffer 物理地址 (STREAMON 后) */
+        fp = fopen("/sys/class/graphics/fb0/phys_addr", "r");
+        if (fp) {
+            char buf[32];
+            if (fgets(buf, sizeof(buf), fp))
+                printf("[PXP-OUT] fb0 phys_addr after  STREAMON: %s", buf);
+            fclose(fp);
+        }
     }
 
     return 0;

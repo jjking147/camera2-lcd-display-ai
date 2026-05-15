@@ -1,6 +1,7 @@
 /*
  * pxp_output_utils.h - PXP output-only 显示模块
- * 只使用 VIDEO_OUTPUT 队列，将 YUYV 数据送到 PXP，由硬件转换 RGB565 输出到 LCD。
+ * 只使用 VIDEO_OUTPUT 队列，将 RGB565 数据送到 PXP，由 PXP DMA 输出到 LCD。
+ * PXP 不做色彩空间转换，调用者需自行将 YUYV 转为 RGB565。
  */
 
 #ifndef PXP_OUTPUT_UTILS_H
@@ -27,6 +28,6 @@ typedef struct
 
 int pxp_output_init(pxp_output_t *pxp, const char *dev, int width, int height);
 int pxp_output_close(pxp_output_t *pxp);
-int pxp_output_put_frame(pxp_output_t *pxp, const uint8_t *yuyv, int width, int height);
+int pxp_output_put_frame(pxp_output_t *pxp, const uint8_t *rgb565, int width, int height);
 
 #endif

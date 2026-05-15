@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3)",
+      "mcp__mimo-image-recognition__understand_image",
+      "Bash(ls /home/fyj/imx6ull_nfs_rootfs/root/)",
+      "Read(//home/fyj/imx6ull_nfs_rootfs/root/**)",
+      "Bash(ffmpeg -f rawvideo -pix_fmt yuyv422 -s 640x480 -i pxp_in_00.yuyv -y pxp_in_00.png)",
+      "Bash(ffmpeg -f rawvideo -pix_fmt uyvy422 -s 640x480 -i pxp_uyvy_02.uyvy -y pxp_uyvy_02.png)",
+      "Bash(ffmpeg -f rawvideo -pix_fmt yuyv422 -s 640x480 -i pxp_in_01.yuyv -y pxp_in_01.png)",
+      "Bash(ffmpeg -f rawvideo -pix_fmt yuyv422 -s 640x480 -i pxp_in_02.yuyv -y pxp_in_02.png)",
+      "Bash(ffmpeg -f rawvideo -pix_fmt uyvy422 -s 640x480 -i pxp_uyvy_00.uyvy -y pxp_uyvy_00.png)",
+      "Bash(dd if=/home/fyj/imx6ull_nfs_rootfs/root/output.yuv of=/home/fyj/camera2项目/output_frame0.bin bs=614400 count=1)",
+      "Bash(ffmpeg -f rawvideo -pix_fmt rgb565le -s 640x480 -i /home/fyj/camera2项目/output_frame0.bin -y -frames:v 1 /home/fyj/camera2项目/output_frame0.png)",
+      "Read(//home/fyj/imx6ull/imx6ull_linux/drivers/media/platform/mxc/output/**)"
+    ]
+  }
+}
